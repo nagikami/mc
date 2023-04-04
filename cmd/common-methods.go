@@ -614,6 +614,7 @@ func uploadSourceToTargetURL(ctx context.Context, urls URLs, progress io.Reader,
 	return urls.WithError(nil)
 }
 
+// newClientFromAlias 根据mc config file创建客户端
 // newClientFromAlias gives a new client interface for matching
 // alias entry in the mc config file. If no matching host config entry
 // is found, fs client is returned.

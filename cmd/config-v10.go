@@ -108,6 +108,7 @@ func (c *configV10) loadDefaults() {
 	})
 }
 
+// loadConfigV10 加载配置
 // loadConfigV10 - loads a new config.
 func loadConfigV10() (*configV10, *probe.Error) {
 	cfgMutex.RLock()
@@ -128,6 +129,7 @@ func loadConfigV10() (*configV10, *probe.Error) {
 		return nil, probe.NewError(e)
 	}
 
+	// 从配置文件加载配置
 	// Load config at configPath, fails if config is not
 	// accessible, malformed or version missing.
 	if e = qc.Load(mustGetMcConfigPath()); e != nil {

@@ -41,11 +41,13 @@ func setMcConfigDir(configDir string) {
 	mcCustomConfigDir = configDir
 }
 
+// getMcConfigDir 获取配置目录
 // getMcConfigDir - construct MinIO Client config folder.
 func getMcConfigDir() (string, *probe.Error) {
 	if mcCustomConfigDir != "" {
 		return mcCustomConfigDir, nil
 	}
+	// 家目录
 	homeDir, e := homedir.Dir()
 	if e != nil {
 		return "", probe.NewError(e)
@@ -54,9 +56,12 @@ func getMcConfigDir() (string, *probe.Error) {
 	return configDir, nil
 }
 
+// defaultMCConfigDir 返回默认配置文件目录（build输出的可执行文件的名称）
 // Return default default mc config directory.
 // Generally you want to use getMcConfigDir which returns custom overrides.
 func defaultMCConfigDir() string {
+	// 仅用于调试，避免ide生成不同的可执行文件名，导致每次运行返回的路径都不同
+	return "mc"
 	if runtime.GOOS == "windows" {
 		// For windows the path is slightly different
 		cmd := filepath.Base(os.Args[0])
@@ -115,8 +120,10 @@ func newMcConfig() *configV10 {
 	return cfg
 }
 
+// 返回一个带有配置缓存的函数闭包
 // loadMcConfigCached - returns loadMcConfig with a closure for config cache.
 func loadMcConfigFactory() func() (*configV10, *probe.Error) {
+	// 加载配置文件并缓存
 	// Load once and cache in a closure.
 	cfgCache, err := loadConfigV10()
 
@@ -192,6 +199,7 @@ func getAliasConfig(alias string) (*aliasConfigV10, *probe.Error) {
 	return nil, errNoMatchingHost(alias).Trace(alias)
 }
 
+// mustGetHostConfig 获取MinIO主机配置信息
 // mustGetHostConfig retrieves host specific configuration such as access keys, signature type.
 func mustGetHostConfig(alias string) *aliasConfigV10 {
 	aliasCfg, _ := getAliasConfig(alias)

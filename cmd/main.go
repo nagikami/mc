@@ -226,6 +226,7 @@ func commandNotFound(ctx *cli.Context, cmds []cli.Command) {
 
 // Check for sane config environment early on and gracefully report.
 func checkConfig() {
+	// 加载配置文件
 	// Refresh the config once.
 	loadMcConfig = loadMcConfigFactory()
 	// Ensures config file is sane.
@@ -358,6 +359,7 @@ func installAutoCompletion() {
 	}
 }
 
+// 在App注册前进行配置预处理
 func registerBefore(ctx *cli.Context) error {
 	if ctx.IsSet("config-dir") {
 		// Set the config directory.
