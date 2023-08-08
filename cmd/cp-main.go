@@ -25,7 +25,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
@@ -243,8 +245,8 @@ type ProgressReader interface {
 	Progress
 }
 
-// doCopy - Copy a single file from source to destination
-func doCopy(ctx context.Context, cpURLs URLs, pg ProgressReader, encKeyDB map[string][]prefixSSEPair, isMvCmd bool, preserve, isZip bool) URLs {
+// doCopy - Copy a single file from source to destination, core function
+func doCopy(ctx context.Context, cpURLs URLs, pg ProgressReader, encKeyDB map[string][]prefixSSEPair, isMvCmd bool, preserve, isZip bool, copiedObjects int64, totalObjects int64, mu sync.Mutex) URLs {
 	if cpURLs.Error != nil {
 		cpURLs.Error = cpURLs.Error.Trace()
 		return cpURLs
@@ -258,7 +260,10 @@ func doCopy(ctx context.Context, cpURLs URLs, pg ProgressReader, encKeyDB map[st
 	sourcePath := filepath.ToSlash(filepath.Join(sourceAlias, sourceURL.Path))
 
 	if progressReader, ok := pg.(*progressBar); ok {
-		progressReader.SetCaption(cpURLs.SourceContent.URL.String() + ":")
+		mu.Lock()
+		copiedObjects++
+		mu.Unlock()
+		progressReader.SetCaption(strconv.FormatInt(copiedObjects, 10) + " / " + strconv.FormatInt(totalObjects, 10) + " :")
 	} else {
 		targetPath := filepath.ToSlash(filepath.Join(targetAlias, targetURL.Path))
 		printMsg(copyMessage{
@@ -380,6 +385,8 @@ func doPrepareCopyURLs(ctx context.Context, session *sessionV8, cancelCopy conte
 func doCopySession(ctx context.Context, cancelCopy context.CancelFunc, cli *cli.Context, session *sessionV8, encKeyDB map[string][]prefixSSEPair, isMvCmd bool) error {
 	var isCopied func(string) bool
 	var totalObjects, totalBytes int64
+	var copiedObjects int64
+	var mu sync.Mutex
 
 	cpURLsCh := make(chan URLs, 10000)
 
@@ -562,7 +569,7 @@ func doCopySession(ctx context.Context, cancelCopy context.CancelFunc, cli *cli.
 						startContinue = false
 					}
 					parallel.queueTask(func() URLs {
-						return doCopy(ctx, cpURLs, pg, encKeyDB, isMvCmd, preserve, isZip)
+						return doCopy(ctx, cpURLs, pg, encKeyDB, isMvCmd, preserve, isZip, copiedObjects, totalObjects, mu)
 					}, cpURLs.SourceContent.Size)
 				}
 			}
@@ -591,6 +598,10 @@ loop:
 			// Status channel is closed, we should return.
 			if !ok {
 				break loop
+			}
+			if progressReader, pgok := pg.(*progressBar); pgok {
+				copiedObjects++
+				progressReader.SetCaption(strconv.FormatInt(copiedObjects, 10) + " / " + strconv.FormatInt(totalObjects, 10) + " :")
 			}
 			if cpURLs.Error == nil {
 				if session != nil {
