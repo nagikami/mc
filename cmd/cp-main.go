@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/dustin/go-humanize"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,7 +30,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/dustin/go-humanize"
 	"github.com/fatih/color"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/minio/cli"
@@ -108,6 +108,10 @@ var (
 		cli.BoolFlag{
 			Name:  "zip",
 			Usage: "Extract from remote zip file (MinIO server source only)",
+		},
+		cli.StringFlag{
+			Name:  "file, f",
+			Usage: "Read source URLs from file",
 		},
 	}
 )
@@ -445,6 +449,7 @@ func doCopySession(ctx context.Context, cancelCopy context.CancelFunc, cli *cli.
 		newerThan := cli.String("newer-than")
 		rewind := cli.String("rewind")
 		versionID := cli.String("version-id")
+		sourceURLsFile := cli.String("file")
 
 		go func() {
 			totalBytes := int64(0)
@@ -458,6 +463,7 @@ func doCopySession(ctx context.Context, cancelCopy context.CancelFunc, cli *cli.
 				timeRef:     parseRewindFlag(rewind),
 				versionID:   versionID,
 				isZip:       cli.Bool("zip"),
+				file:        sourceURLsFile,
 			}
 			for cpURLs := range prepareCopyURLs(ctx, opts) {
 				if cpURLs.Error != nil {
@@ -696,6 +702,7 @@ func mainCopy(cliCtx *cli.Context) error {
 	legalHold := strings.ToUpper(cliCtx.String(lhFlag))
 	tags := cliCtx.String("tags")
 	sseKeys := os.Getenv("MC_ENCRYPT_KEY")
+	sourceURLsFile := cliCtx.String("file")
 	if key := cliCtx.String("encrypt-key"); key != "" {
 		sseKeys = key
 	}
@@ -729,6 +736,7 @@ func mainCopy(cliCtx *cli.Context) error {
 			session.Header.CommandStringFlags["encrypt-key"] = sseKeys
 			session.Header.CommandStringFlags["encrypt"] = sse
 			session.Header.CommandBoolFlags["session"] = cliCtx.Bool("continue")
+			session.Header.CommandStringFlags["file"] = sourceURLsFile
 
 			if cliCtx.Bool("preserve") {
 				session.Header.CommandBoolFlags["preserve"] = cliCtx.Bool("preserve")

@@ -18,7 +18,10 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -158,7 +161,7 @@ func makeCopyContentTypeB(sourceAlias string, sourceContent *ClientContent, targ
 
 // SINGLE SOURCE - Type C: copy(d1..., d2) -> []copy(d1/f, d1/d2/f) -> []A
 // prepareCopyRecursiveURLTypeC - prepares target and source clientURLs for copying.
-func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRecursive, isZip bool, timeRef time.Time) <-chan URLs {
+func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRecursive, isZip bool, timeRef time.Time, sourceURLsFile string) <-chan URLs {
 	// Extract alias before fiddling with the clientURL.
 	sourceAlias, _, _ := mustExpandAlias(sourceURL)
 	// Find alias and expanded clientURL.
@@ -172,8 +175,29 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 			copyURLsCh <- URLs{Error: err.Trace(sourceURL)}
 			return
 		}
+		var contentCh <-chan *ClientContent
+		if sourceURLsFile != "" {
+			contentChB := make(chan *ClientContent)
+			for _, object := range readFile2Slice(sourceURLsFile) {
+				go func() {
+					defer close(contentChB)
+					srcURL := sourceAlias + "\\" + object
+					sourceClient, err := newClient(srcURL)
+					if err != nil {
+						// Source initialization failed.
+						copyURLsCh <- URLs{Error: err.Trace(srcURL)}
+						return
+					}
+					object, _ := sourceClient.Stat(ctx, StatOptions{})
+					contentChB <- object
+				}()
+			}
+			contentCh = contentChB
+		} else {
+			contentCh = sourceClient.List(ctx, ListOptions{Recursive: isRecursive, TimeRef: timeRef, ShowDir: DirNone, ListZip: isZip})
+		}
 
-		for sourceContent := range sourceClient.List(ctx, ListOptions{Recursive: isRecursive, TimeRef: timeRef, ShowDir: DirNone, ListZip: isZip}) {
+		for sourceContent := range contentCh {
 			if sourceContent.Err != nil {
 				// Listing failed.
 				copyURLsCh <- URLs{Error: sourceContent.Err.Trace(sourceClient.GetURL().String())}
@@ -190,6 +214,26 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 		}
 	}(sourceURL, targetURL, copyURLsCh)
 	return copyURLsCh
+}
+
+func readFile2Slice(sourceURLsFile string) []string {
+	file, err := os.Open(sourceURLsFile)
+	if err != nil {
+		fmt.Println("Error opening file:", err)
+		return nil
+	}
+	defer file.Close()
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Println("Error reading file:", err)
+		return nil
+	}
+	return lines
 }
 
 // makeCopyContentTypeC - CopyURLs content for copying.
@@ -212,7 +256,7 @@ func prepareCopyURLsTypeD(ctx context.Context, sourceURLs []string, targetURL st
 	go func(sourceURLs []string, targetURL string, copyURLsCh chan URLs) {
 		defer close(copyURLsCh)
 		for _, sourceURL := range sourceURLs {
-			for cpURLs := range prepareCopyURLsTypeC(ctx, sourceURL, targetURL, isRecursive, false, timeRef) {
+			for cpURLs := range prepareCopyURLsTypeC(ctx, sourceURL, targetURL, isRecursive, false, timeRef, "") {
 				copyURLsCh <- cpURLs
 			}
 		}
@@ -229,6 +273,7 @@ type prepareCopyURLsOpts struct {
 	timeRef              time.Time
 	versionID            string
 	isZip                bool
+	file                 string
 }
 
 // prepareCopyURLs - prepares target and source clientURLs for copying.
@@ -245,7 +290,54 @@ func prepareCopyURLs(ctx context.Context, o prepareCopyURLsOpts) chan URLs {
 		case copyURLsTypeB:
 			copyURLsCh <- prepareCopyURLsTypeB(ctx, o.sourceURLs[0], cpVersion, o.targetURL, o.encKeyDB, o.isZip)
 		case copyURLsTypeC:
-			for cURLs := range prepareCopyURLsTypeC(ctx, o.sourceURLs[0], o.targetURL, o.isRecursive, o.isZip, o.timeRef) {
+			for cURLs := range prepareCopyURLsTypeC(ctx, o.sourceURLs[0], o.targetURL, o.isRecursive, o.isZip, o.timeRef, o.file) {
+				copyURLsCh <- cURLs
+			}
+		case copyURLsTypeD:
+			for cURLs := range prepareCopyURLsTypeD(ctx, o.sourceURLs, o.targetURL, o.isRecursive, o.timeRef) {
+				copyURLsCh <- cURLs
+			}
+		default:
+			copyURLsCh <- URLs{Error: errInvalidArgument().Trace(o.sourceURLs...)}
+		}
+	}(o)
+
+	finalCopyURLsCh := make(chan URLs)
+	go func() {
+		defer close(finalCopyURLsCh)
+		for cpURLs := range copyURLsCh {
+			// Skip objects older than --older-than parameter if specified
+			if o.olderThan != "" && isOlder(cpURLs.SourceContent.Time, o.olderThan) {
+				continue
+			}
+
+			// Skip objects newer than --newer-than parameter if specified
+			if o.newerThan != "" && isNewer(cpURLs.SourceContent.Time, o.newerThan) {
+				continue
+			}
+
+			finalCopyURLsCh <- cpURLs
+		}
+	}()
+
+	return finalCopyURLsCh
+}
+
+// prepareCopyURLsFromFile - prepares target and source clientURLs for copying.
+func prepareCopyURLsFromFile(ctx context.Context, o prepareCopyURLsOpts) chan URLs {
+	copyURLsCh := make(chan URLs)
+	go func(o prepareCopyURLsOpts) {
+		defer close(copyURLsCh)
+		cpType, cpVersion, err := guessCopyURLType(ctx, o)
+		fatalIf(err.Trace(), "Unable to guess the type of copy operation.")
+
+		switch cpType {
+		case copyURLsTypeA:
+			copyURLsCh <- prepareCopyURLsTypeA(ctx, o.sourceURLs[0], cpVersion, o.targetURL, o.encKeyDB, o.isZip)
+		case copyURLsTypeB:
+			copyURLsCh <- prepareCopyURLsTypeB(ctx, o.sourceURLs[0], cpVersion, o.targetURL, o.encKeyDB, o.isZip)
+		case copyURLsTypeC:
+			for cURLs := range prepareCopyURLsTypeC(ctx, o.sourceURLs[0], o.targetURL, o.isRecursive, o.isZip, o.timeRef, "") {
 				copyURLsCh <- cURLs
 			}
 		case copyURLsTypeD:
