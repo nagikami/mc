@@ -20,7 +20,7 @@ package cmd
 import (
 	"bufio"
 	"context"
-	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,22 +177,7 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 		}
 		var contentCh <-chan *ClientContent
 		if sourceURLsFile != "" {
-			contentChB := make(chan *ClientContent)
-			for _, object := range readFile2Slice(sourceURLsFile) {
-				go func() {
-					defer close(contentChB)
-					srcURL := sourceAlias + "\\" + object
-					sourceClient, err := newClient(srcURL)
-					if err != nil {
-						// Source initialization failed.
-						copyURLsCh <- URLs{Error: err.Trace(srcURL)}
-						return
-					}
-					object, _ := sourceClient.Stat(ctx, StatOptions{})
-					contentChB <- object
-				}()
-			}
-			contentCh = contentChB
+			contentCh = listFromFile(ctx, copyURLsCh, sourceURLsFile, sourceAlias)
 		} else {
 			contentCh = sourceClient.List(ctx, ListOptions{Recursive: isRecursive, TimeRef: timeRef, ShowDir: DirNone, ListZip: isZip})
 		}
@@ -216,24 +201,53 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 	return copyURLsCh
 }
 
-func readFile2Slice(sourceURLsFile string) []string {
+func listFromFile(ctx context.Context, copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string) <-chan *ClientContent {
+	contentCh := make(chan *ClientContent)
+	batch := 1000
 	file, err := os.Open(sourceURLsFile)
 	if err != nil {
-		fmt.Println("Error opening file:", err)
-		return nil
+		log.Fatal(err)
 	}
-	defer file.Close()
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
+	go func() {
+		defer file.Close()
+		defer close(contentCh)
+		scanner := bufio.NewScanner(file)
 
-	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading file:", err)
-		return nil
-	}
-	return lines
+		var lines []string
+		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
+			if len(lines) == batch {
+				for _, object := range lines {
+					srcURL := sourceAlias + "\\" + object
+					sourceClient, err := newClient(srcURL)
+					if err != nil {
+						// Source initialization failed.
+						copyURLsCh <- URLs{Error: err.Trace(srcURL)}
+					}
+					object, _ := sourceClient.Stat(ctx, StatOptions{})
+					contentCh <- object
+				}
+				lines = nil
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			log.Fatal(err)
+		}
+		if len(lines) > 0 {
+			for _, object := range lines {
+				srcURL := sourceAlias + "\\" + object
+				sourceClient, err := newClient(srcURL)
+				if err != nil {
+					// Source initialization failed.
+					copyURLsCh <- URLs{Error: err.Trace(srcURL)}
+				}
+				object, _ := sourceClient.Stat(ctx, StatOptions{})
+				contentCh <- object
+			}
+		}
+	}()
+	return contentCh
 }
 
 // makeCopyContentTypeC - CopyURLs content for copying.
