@@ -227,7 +227,7 @@ func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias strin
 						size, _ = strconv.ParseInt(words[0], 10, 64)
 						object = words[1]
 					}
-					srcURL := sourceAlias + "\\" + object
+					srcURL := sourceAlias + string(filepath.Separator) + object
 					sourceClient, err := newClient(srcURL)
 					if err != nil {
 						// Source initialization failed.
@@ -250,7 +250,7 @@ func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias strin
 					size, _ = strconv.ParseInt(words[0], 10, 64)
 					object = words[1]
 				}
-				srcURL := sourceAlias + "\\" + object
+				srcURL := sourceAlias + string(filepath.Separator) + object
 				sourceClient, err := newClient(srcURL)
 				if err != nil {
 					// Source initialization failed.
