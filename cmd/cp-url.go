@@ -244,6 +244,12 @@ func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias strin
 		}
 		if len(lines) > 0 {
 			for _, object := range lines {
+				regex := regexp.MustCompile(`\t`)
+				words := regex.Split(object, -1)
+				if len(words) > 1 {
+					size, _ = strconv.ParseInt(words[0], 10, 64)
+					object = words[1]
+				}
 				srcURL := sourceAlias + "\\" + object
 				sourceClient, err := newClient(srcURL)
 				if err != nil {
