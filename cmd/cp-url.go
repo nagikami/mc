@@ -23,6 +23,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +179,7 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 		}
 		var contentCh <-chan *ClientContent
 		if sourceURLsFile != "" {
-			contentCh = listFromFile(ctx, copyURLsCh, sourceURLsFile, sourceAlias)
+			contentCh = listFromFile(copyURLsCh, sourceURLsFile, sourceAlias)
 		} else {
 			contentCh = sourceClient.List(ctx, ListOptions{Recursive: isRecursive, TimeRef: timeRef, ShowDir: DirNone, ListZip: isZip})
 		}
@@ -201,7 +203,7 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 	return copyURLsCh
 }
 
-func listFromFile(ctx context.Context, copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string) <-chan *ClientContent {
+func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string) <-chan *ClientContent {
 	contentCh := make(chan *ClientContent)
 	batch := 1000
 	file, err := os.Open(sourceURLsFile)
@@ -214,18 +216,24 @@ func listFromFile(ctx context.Context, copyURLsCh chan URLs, sourceURLsFile stri
 		scanner := bufio.NewScanner(file)
 
 		var lines []string
+		var size int64 = -1
 		for scanner.Scan() {
 			lines = append(lines, scanner.Text())
 			if len(lines) == batch {
 				for _, object := range lines {
+					regex := regexp.MustCompile(`\t`)
+					words := regex.Split(object, -1)
+					if len(words) > 1 {
+						size, _ = strconv.ParseInt(words[0], 10, 64)
+						object = words[1]
+					}
 					srcURL := sourceAlias + "\\" + object
 					sourceClient, err := newClient(srcURL)
 					if err != nil {
 						// Source initialization failed.
 						copyURLsCh <- URLs{Error: err.Trace(srcURL)}
 					}
-					object, _ := sourceClient.Stat(ctx, StatOptions{})
-					contentCh <- object
+					contentCh <- objectInfo2ClientContent(sourceClient.GetS3Client(), size)
 				}
 				lines = nil
 			}
@@ -242,12 +250,36 @@ func listFromFile(ctx context.Context, copyURLsCh chan URLs, sourceURLsFile stri
 					// Source initialization failed.
 					copyURLsCh <- URLs{Error: err.Trace(srcURL)}
 				}
-				object, _ := sourceClient.Stat(ctx, StatOptions{})
-				contentCh <- object
+				contentCh <- objectInfo2ClientContent(sourceClient.GetS3Client(), size)
 			}
 		}
 	}()
 	return contentCh
+}
+
+func objectInfo2ClientContent(c *S3Client, size int64) *ClientContent {
+	content := &ClientContent{}
+	b, o := c.url2BucketAndObject()
+	url := c.targetURL.Clone()
+	// Join bucket and incoming object key.
+	if b == "" {
+		panic("should never happen, bucket cannot be empty")
+	}
+	url.Path = c.buildAbsPath(b, o)
+	content.URL = url
+	content.BucketName = b
+	content.Size = size
+
+	if strings.HasSuffix(o, string(c.targetURL.Separator)) {
+		content.Type = os.ModeDir
+		if content.Time.IsZero() {
+			content.Time = time.Now()
+		}
+	} else {
+		content.Type = os.FileMode(0o664)
+	}
+
+	return content
 }
 
 // makeCopyContentTypeC - CopyURLs content for copying.

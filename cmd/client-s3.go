@@ -262,6 +262,14 @@ func newFactory() func(config *Config) (Client, *probe.Error) {
 // it also enables an internal trace transport.
 var S3New = newFactory()
 
+func (c *S3Client) GetS3Client() *S3Client {
+	return c
+}
+
+func (c *S3Client) GetFsClient() *fsClient {
+	return nil
+}
+
 // GetURL get url.
 func (c *S3Client) GetURL() ClientURL {
 	return c.targetURL.Clone()

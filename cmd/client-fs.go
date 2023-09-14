@@ -128,6 +128,14 @@ func isIgnoredFile(filename string) bool {
 	return false
 }
 
+func (f *fsClient) GetS3Client() *S3Client {
+	return nil
+}
+
+func (f *fsClient) GetFsClient() *fsClient {
+	return f
+}
+
 // URL get url.
 func (f *fsClient) GetURL() ClientURL {
 	return *f.PathURL

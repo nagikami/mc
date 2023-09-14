@@ -99,6 +99,8 @@ type CopyOptions struct {
 
 // Client - client interface
 type Client interface {
+	GetS3Client() *S3Client
+	GetFsClient() *fsClient
 	// Common operations
 	Stat(ctx context.Context, opts StatOptions) (content *ClientContent, err *probe.Error)
 	List(ctx context.Context, opts ListOptions) <-chan *ClientContent
