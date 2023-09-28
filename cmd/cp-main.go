@@ -250,7 +250,7 @@ type ProgressReader interface {
 }
 
 // doCopy - Copy a single file from source to destination, core function
-func doCopy(ctx context.Context, cpURLs URLs, pg ProgressReader, encKeyDB map[string][]prefixSSEPair, isMvCmd bool, preserve, isZip bool, copiedObjects int64, totalObjects int64, mu sync.Mutex) URLs {
+func doCopy(ctx context.Context, cpURLs URLs, pg ProgressReader, encKeyDB map[string][]prefixSSEPair, isMvCmd bool, preserve, isZip bool, copiedObjects int64, totalObjects int64, mu *sync.Mutex) URLs {
 	if cpURLs.Error != nil {
 		cpURLs.Error = cpURLs.Error.Trace()
 		return cpURLs
@@ -575,7 +575,7 @@ func doCopySession(ctx context.Context, cancelCopy context.CancelFunc, cli *cli.
 						startContinue = false
 					}
 					parallel.queueTask(func() URLs {
-						return doCopy(ctx, cpURLs, pg, encKeyDB, isMvCmd, preserve, isZip, copiedObjects, totalObjects, mu)
+						return doCopy(ctx, cpURLs, pg, encKeyDB, isMvCmd, preserve, isZip, copiedObjects, totalObjects, &mu)
 					}, cpURLs.SourceContent.Size)
 				}
 			}
