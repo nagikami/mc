@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/minio/mc/pkg/probe"
@@ -179,7 +180,8 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 		}
 		var contentCh <-chan *ClientContent
 		if sourceURLsFile != "" {
-			contentCh = listFromFile(copyURLsCh, sourceURLsFile, sourceAlias)
+			var mutex sync.Mutex
+			contentCh = listFromFile(copyURLsCh, sourceURLsFile, sourceAlias, &mutex)
 		} else {
 			contentCh = sourceClient.List(ctx, ListOptions{Recursive: isRecursive, TimeRef: timeRef, ShowDir: DirNone, ListZip: isZip})
 		}
@@ -203,7 +205,9 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 	return copyURLsCh
 }
 
-func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string) <-chan *ClientContent {
+func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string, mutex *sync.Mutex) <-chan *ClientContent {
+	mutex.Lock()
+	defer mutex.Unlock()
 	contentCh := make(chan *ClientContent)
 	batch := 1000
 	file, err := os.Open(sourceURLsFile)
@@ -264,6 +268,8 @@ func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias strin
 }
 
 func objectInfo2ClientContent(c *S3Client, size int64) *ClientContent {
+	c.Lock()
+	defer c.Unlock()
 	content := &ClientContent{}
 	b, o := c.url2BucketAndObject()
 	url := c.targetURL.Clone()
