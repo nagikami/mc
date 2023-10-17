@@ -181,7 +181,7 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 		var contentCh <-chan *ClientContent
 		if sourceURLsFile != "" {
 			var mutex sync.Mutex
-			contentCh = listFromFile(copyURLsCh, sourceURLsFile, sourceAlias, &mutex)
+			contentCh = listFromFile(ctx, copyURLsCh, sourceURLsFile, sourceAlias, &mutex)
 		} else {
 			contentCh = sourceClient.List(ctx, ListOptions{Recursive: isRecursive, TimeRef: timeRef, ShowDir: DirNone, ListZip: isZip})
 		}
@@ -205,7 +205,7 @@ func prepareCopyURLsTypeC(ctx context.Context, sourceURL, targetURL string, isRe
 	return copyURLsCh
 }
 
-func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string, mutex *sync.Mutex) <-chan *ClientContent {
+func listFromFile(ctx context.Context, copyURLsCh chan URLs, sourceURLsFile string, sourceAlias string, mutex *sync.Mutex) <-chan *ClientContent {
 	mutex.Lock()
 	defer mutex.Unlock()
 	contentCh := make(chan *ClientContent)
@@ -260,7 +260,12 @@ func listFromFile(copyURLsCh chan URLs, sourceURLsFile string, sourceAlias strin
 					// Source initialization failed.
 					copyURLsCh <- URLs{Error: err.Trace(srcURL)}
 				}
-				contentCh <- objectInfo2ClientContent(sourceClient.GetS3Client(), size)
+				if len(words) > 1 {
+					contentCh <- objectInfo2ClientContent(sourceClient.GetS3Client(), size)
+				} else {
+					contentObject, _ := sourceClient.GetS3Client().Stat(ctx, StatOptions{})
+					contentCh <- contentObject
+				}
 			}
 		}
 	}()
